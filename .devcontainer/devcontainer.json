@@ -16,6 +16,9 @@
 	"workspaceFolder": "/app",
 	// All containers should stop if we close / reload the VSCode window.
 	"shutdownAction": "stopCompose",
+	"features": {
+		"ghcr.io/jsburckhardt/devcontainer-features/just:1": {}
+	},
 	"customizations": {
 		"vscode": {
 			// Set *default* container specific settings.json values on container create.
