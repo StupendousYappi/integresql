@@ -27,6 +27,8 @@ var (
 	ErrInvalidTemplateState       = errors.New("unexpected template state")
 )
 
+const createDatabaseFileCopyMinServerVersionNum = 150000
+
 type Manager struct {
 	config ManagerConfig
 	db     *sql.DB
@@ -517,13 +519,48 @@ func (m Manager) createDatabase(ctx context.Context, dbName string, owner string
 	defer trace.StartRegion(ctx, "create_db").End()
 
 	log := m.getManagerLogger(ctx, "createDatabase")
-	log.Trace().Msgf("CREATE DATABASE %s WITH OWNER %s TEMPLATE %s\n", pq.QuoteIdentifier(dbName), pq.QuoteIdentifier(owner), pq.QuoteIdentifier(template))
+	serverVersionNum, err := m.getServerVersionNum(ctx)
+	if err != nil {
+		return err
+	}
 
-	if _, err := m.db.ExecContext(ctx, fmt.Sprintf("CREATE DATABASE %s WITH OWNER %s TEMPLATE %s", pq.QuoteIdentifier(dbName), pq.QuoteIdentifier(owner), pq.QuoteIdentifier(template))); err != nil {
+	stmt := createDatabaseStatement(dbName, owner, template, shouldUseCreateDatabaseFileCopyStrategy(serverVersionNum))
+	log.Trace().Msgf("%s\n", stmt)
+
+	if _, err := m.db.ExecContext(ctx, stmt); err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func (m Manager) getServerVersionNum(ctx context.Context) (int, error) {
+	var serverVersionNum int
+
+	if err := m.db.QueryRowContext(ctx, "SHOW server_version_num").Scan(&serverVersionNum); err != nil {
+		return 0, err
+	}
+
+	return serverVersionNum, nil
+}
+
+func shouldUseCreateDatabaseFileCopyStrategy(serverVersionNum int) bool {
+	return serverVersionNum >= createDatabaseFileCopyMinServerVersionNum
+}
+
+func createDatabaseStatement(dbName string, owner string, template string, useFileCopyStrategy bool) string {
+	stmt := fmt.Sprintf(
+		"CREATE DATABASE %s WITH OWNER %s TEMPLATE %s",
+		pq.QuoteIdentifier(dbName),
+		pq.QuoteIdentifier(owner),
+		pq.QuoteIdentifier(template),
+	)
+
+	if useFileCopyStrategy {
+		stmt += " STRATEGY=FILE_COPY"
+	}
+
+	return stmt
 }
 
 func (m Manager) recreateTestPoolDB(ctx context.Context, testDB db.TestDatabase, templateName string) error {
